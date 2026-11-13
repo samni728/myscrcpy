@@ -1,0 +1,9 @@
+/Build/
+.DS_Store
+*.ips
+*.log
+*.swp
+.vscode/
+.idea/
+/docs/images/*-raw.png
+/docs/images/*-sanitized.png
