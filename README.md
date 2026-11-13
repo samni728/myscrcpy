@@ -6,7 +6,7 @@
 
 A native macOS launcher and floating control toolbar for [scrcpy](https://github.com/Genymobile/scrcpy), inspired by [QtScrcpy](https://github.com/barry-ran/QtScrcpy).
 
-![macOS](https://img.shields.io/badge/macOS-12%2B-black?logo=apple) ![scrcpy](https://img.shields.io/badge/scrcpy-5.0.1-blue) ![version](https://img.shields.io/badge/version-0.1.0-orange)
+![macOS](https://img.shields.io/badge/macOS-12%2B-black?logo=apple) ![scrcpy](https://img.shields.io/badge/scrcpy-5.0.1-blue) ![version](https://img.shields.io/badge/version-0.1.1-orange)
 
 </div>
 
@@ -24,12 +24,20 @@ A native macOS launcher and floating control toolbar for [scrcpy](https://github
 </tr>
 </table>
 
+## 🆕 v0.1.1 更新 / What's new
+
+- **手机实体屏幕开 / 关独立控制**：侧边菜单可关闭手机的物理显示器，**scrcpy 远程画面仍保持开启并可操作**；可再点击点亮，不再误用 Android 电源键。采用 Android 侧 SurfaceControl，已在 Xiaomi Mi 3W / Android 11 上实机验证。
+- **修复工具栏定时器相关崩溃风险**：让 AppController 在应用存续期间保持强引用，避免主窗口属性被计时器访问时出现悬空对象访问。长时间连续运行仍需要进一步观察。
+- **打包 Android 显示控制组件**：不依赖 macOS 辅助功能权限；保留 USB、Wi-Fi 多设备精确选择。
+
+> 设备屏幕开关是针对 Android 11 / Xiaomi Mi 3W 验证的功能，其他 Android 系统版本的隐藏 SurfaceControl 接口可能不同；该功能不使用 root、不会关闭 scrcpy 会话。
+
 ## ✨ 功能 / Features
 
 - **USB / Wi-Fi 连接选择：** 自动发现 ADB 已授权设备；可刷新列表、填写 IP 连接无线 ADB。
 - **指定设备投屏：** 使用已安装的 `scrcpy 5.0.1`，通过 ADB 序列号选择手机，避免多机混淆。
 - **可隐藏侧栏：** 原生 AppKit 悬浮工具栏跟随 scrcpy 投屏窗口，可点击 `≡` 折叠/展开。
-- **快捷控制：** 手机屏幕电源与唤醒、音量加/减、静音、Home、返回、最近任务、通知栏、关闭投屏。
+- **快捷控制：** 手机实体屏幕独立熄灭/点亮、音量加/减、静音、Home、返回、最近任务、通知栏、关闭投屏。
 - **远程截图：** 通过 ADB 保存到 `~/Pictures/MiScrcpyMac/<device>/`。
 - **关闭手机实体屏幕：** 可选择在开始投屏时使用 `--turn-screen-off`，电脑画面不受影响。
 - **菜单栏快捷入口：** 可从 macOS 菜单栏重新打开管理界面。
@@ -38,9 +46,9 @@ A native macOS launcher and floating control toolbar for [scrcpy](https://github
 
 ## ⬇️ 下载 / Download
 
-**[MiScrcpy Mac v0.1.0 DMG](dist/MiScrcpy-Mac-0.1.0.dmg)**
+**[MiScrcpy Mac v0.1.1 DMG](dist/MiScrcpy-Mac-0.1.1.dmg)**
 
-本版本是开发者预览版，安装包采用 **ad-hoc 本地签名，未经过 Apple 公证**。DMG 仅包含 Mac 前端，**不捆绑 scrcpy 或 adb**，请先安装依赖：
+本版本是开发者预览版，安装包采用 **ad-hoc 本地签名，未经过 Apple 公证**。DMG 包含 Mac 前端和 Android 显示控制组件，**不捆绑 scrcpy 或 adb**，请先安装依赖：
 
 ```bash
 brew install scrcpy
@@ -88,7 +96,7 @@ chmod +x scripts/build.sh
 | `Sources/main.m` | 原生应用、ADB 设备管理、scrcpy 进程和浮动侧栏 |
 | `scripts/build.sh` | 编译、ad-hoc 签名和 DMG 打包 |
 | `Build/MiScrcpy Mac.app` | 本机编译的 App（已忽略，不提交 Git） |
-| `dist/MiScrcpy-Mac-0.1.0.dmg` | 可下载 DMG |
+| `dist/MiScrcpy-Mac-0.1.1.dmg` | 可下载 DMG |
 
 ## 🧪 验证和限制 / Tested & Limitations
 
@@ -103,8 +111,8 @@ chmod +x scripts/build.sh
 | 内置录屏、音频转发、离线全依赖安装 | 暂未支持 |
 
 - **全屏**：在 scrcpy 投屏窗口使用 `Cmd+F`。当前侧栏全屏按钮提供快捷键提示。
-- **手机熄屏**：侧栏电源按钮会发送 Android 电源键。如希望手机实体屏幕关闭但电脑继续投屏，请使用启动界面的「启动时关闭手机实体屏幕」。
-- **录屏**：旧设备使用 scrcpy 录制时曾出现崩溃，因此 0.1.0 没有内置录屏功能。
+- **手机熄屏**：新版侧栏支持独立实体熄屏/点亮。如希望手机实体屏幕关闭但电脑继续投屏，请使用启动界面的「启动时关闭手机实体屏幕」。
+- **录屏**：旧设备使用 scrcpy 录制时曾出现崩溃，因此 0.1.1 没有内置录屏功能。
 - **依赖**：目前只搜索本机 `/opt/homebrew/bin` 或 `/usr/local/bin` 下的 `scrcpy`、`adb`。
 - **安全**：应用不会修改手机 root、ROM、Magisk 或 Google Photos 备份配置。
 

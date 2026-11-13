@@ -54,8 +54,8 @@ static NSButton *button(NSString *title, SEL action, id target, NSRect frame) {
 }
 
 @interface AppController : NSObject <NSApplicationDelegate, NSWindowDelegate>
-@property NSWindow *mainWindow;
-@property NSPanel *toolbar;
+@property (strong) NSWindow *mainWindow;
+@property (strong) NSPanel *toolbar;
 @property NSVisualEffectView *toolbarBackground;
 @property NSMutableArray<NSButton *> *toolbarActions;
 @property NSPopUpButton *deviceList;
@@ -64,8 +64,8 @@ static NSButton *button(NSString *title, SEL action, id target, NSRect frame) {
 @property NSButton *screenOffCheck;
 @property NSButton *connectButton;
 @property NSButton *stopButton;
-@property NSTask *scrcpyTask;
-@property NSTimer *followTimer;
+@property (strong) NSTask *scrcpyTask;
+@property (strong) NSTimer *followTimer;
 @property NSString *activeSerial;
 @property BOOL expanded;
 @property BOOL screenSleeping;
@@ -77,6 +77,16 @@ static NSButton *button(NSString *title, SEL action, id target, NSRect frame) {
 - (void)status:(NSString *)message {
     self.statusLabel.stringValue = message ?: @"";
     NSLog(@"[MiScrcpy] %@", message);
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"--smoke-power"]) {
+        NSString *path=@"/tmp/mi3-smoke-power-debug.log";
+        if (![NSFileManager.defaultManager fileExistsAtPath:path])
+            [NSFileManager.defaultManager createFileAtPath:path contents:nil attributes:nil];
+        NSFileHandle *f=[NSFileHandle fileHandleForWritingAtPath:path];
+        [f seekToEndOfFile];
+        NSString *line=[NSString stringWithFormat:@"%@ | %@\n",[NSDate date],message?:@""];
+        [f writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+        [f closeFile];
+    }
 }
 - (void)buildWindow {
     self.mainWindow = [[NSWindow alloc] initWithContentRect:NSMakeRect(0,0,550,407)
@@ -169,8 +179,8 @@ static NSButton *button(NSString *title, SEL action, id target, NSRect frame) {
 
     // 从顶向下排：折叠、熄/亮屏、截屏、音量、静音、导航、通知、电源和关闭。
     NSArray<NSArray *> *items=@[
-        @[@"power", @"手机实体屏幕电源开关", @1],
-        @[@"sun.max", @"唤醒手机屏幕", @2],
+        @[@"moon.zzz", @"只关闭实体屏幕（电脑投屏保持）", @1],
+        @[@"sun.max", @"点亮手机实体屏幕（电脑投屏保持）", @2],
         @[@"camera", @"保存手机截图到图片目录", @3],
         @[@"speaker.wave.3", @"音量加", @4],
         @[@"speaker.wave.1", @"音量减", @5],
@@ -308,7 +318,8 @@ static NSButton *button(NSString *title, SEL action, id target, NSRect frame) {
     NSError *err=nil; if(![t launchAndReturnError:&err]) {
         [self status:[NSString stringWithFormat:@"无法启动：%@",err.localizedDescription]]; return;
     }
-    self.scrcpyTask=t; self.activeSerial=serial; self.screenSleeping=NO;
+    self.scrcpyTask=t; self.activeSerial=serial;
+    self.screenSleeping=(self.screenOffCheck.state==NSControlStateValueOn);
     self.connectButton.enabled=NO; self.stopButton.enabled=YES;
     self.expanded=YES;
     for(NSButton *b in self.toolbarActions) b.hidden=NO;
@@ -365,10 +376,51 @@ static NSButton *button(NSString *title, SEL action, id target, NSRect frame) {
         });
     });
 }
+// 通过 Android SurfaceControl 只管理实体面板电源，不改变设备休眠状态或 scrcpy 视频流。
+- (void)setPhysicalScreenOn:(BOOL)on {
+    NSString *serial=[self.activeSerial copy];
+    if (!self.scrcpyTask.isRunning || !serial.length) {
+        [self status:@"请先连接设备并启动投屏"];
+        return;
+    }
+    NSString *helper=[[NSBundle mainBundle] pathForResource:@"miscrcpy-screenpower" ofType:@"jar"];
+    if (!helper.length) {
+        [self status:@"显示控制组件未打包，请安装新版 MiScrcpy Mac"];
+        return;
+    }
+    [self status:on?@"正在点亮手机实体屏幕…":@"正在关闭手机实体屏幕（远程投屏不关闭）…"];
+    __weak typeof(self) weakSelf=self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0), ^{
+        int uploadCode=0;
+        runCapture(adbPath(),@[@"-s",serial,@"push",helper,
+                               @"/data/local/tmp/miscrcpy-screenpower.jar"],NULL,&uploadCode);
+        int code=127;
+        NSString *mode=on?@"on":@"off";
+        NSString *output=@"";
+        if (uploadCode==0) {
+            NSString *shellCommand=[NSString stringWithFormat:
+                 @"CLASSPATH=/data/local/tmp/miscrcpy-screenpower.jar app_process /system/bin com.samni.miscrcpy.ScreenPower %@",mode];
+            output=runCapture(adbPath(),@[@"-s",serial,@"shell",shellCommand],NULL,&code);
+        }
+        NSString *okMessage=[NSString stringWithFormat:@"MISCRCPY_SCREEN_POWER %@ OK",mode];
+        BOOL ok=(uploadCode==0 && code==0 && [output containsString:okMessage]);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            AppController *strongSelf=weakSelf;
+            if (!strongSelf) return;
+            if (!ok) {
+                [strongSelf status:@"屏幕操作失败：设备授权或 SurfaceControl 权限异常；未发送电源键"];
+                return;
+            }
+            if ([strongSelf.activeSerial isEqualToString:serial]) strongSelf.screenSleeping=!on;
+            [strongSelf status:on?@"手机实体屏幕已点亮；scrcpy 仍继续投屏":
+                              @"手机实体屏幕已关闭；scrcpy 仍继续显示、可操作"];
+        });
+    });
+}
 - (void)toolbarPressed:(NSButton *)sender {
     switch(sender.tag) {
-        case 1: [self sendKey:26 description:@"屏幕电源"]; break;
-        case 2: [self sendKey:224 description:@"唤醒屏幕"];break;
+        case 1: [self setPhysicalScreenOn:NO];break;
+        case 2: [self setPhysicalScreenOn:YES];break;
         case 3: [self saveScreenshot];break;
         case 4: [self sendKey:24 description:@"音量加"];break;
         case 5: [self sendKey:25 description:@"音量减"];break;
@@ -436,6 +488,7 @@ static NSButton *button(NSString *title, SEL action, id target, NSRect frame) {
     for(NSString *arg in NSProcessInfo.processInfo.arguments) {
         if([arg isEqualToString:@"--smoke-usb"]) smokeMode=@"usb";
         else if([arg isEqualToString:@"--smoke-wifi"]) smokeMode=@"wifi";
+        else if([arg isEqualToString:@"--smoke-power"]) smokeMode=@"power";
     }
     if(smokeMode) {
         NSString *mode=[smokeMode copy];
@@ -452,6 +505,21 @@ static NSButton *button(NSString *title, SEL action, id target, NSRect frame) {
                 if([it.representedObject isEqual:serial]) { [self.deviceList selectItem:it];break; }
             [self startPressed:nil];
         });
+        if ([mode isEqualToString:@"power"]) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+                for (NSButton *b in self.toolbarActions) if(b.tag==1) {[b performClick:nil]; break;}
+            });
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(13*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+                for (NSButton *b in self.toolbarActions) if(b.tag==2) {[b performClick:nil]; break;}
+            });
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(23*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+                [self stopPressed:nil];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+                    [NSApp terminate:nil];
+                });
+            });
+            return;
+        }
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(7*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
             if(self.scrcpyTask.isRunning) [self saveScreenshot];
             [self toggleToolbar:nil];
@@ -480,13 +548,19 @@ static NSButton *button(NSString *title, SEL action, id target, NSRect frame) {
         });
     }
 }
-- (void)follow:(NSTimer *)timer { [self alignToolbar]; }
+- (void)follow:(NSTimer *)timer {
+    if (timer!=self.followTimer || !self.scrcpyTask.isRunning || !self.toolbar.isVisible) return;
+    [self alignToolbar];
+}
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return NO; }
 - (void)applicationWillTerminate:(NSNotification *)notification {
     [self.followTimer invalidate];
     if(self.scrcpyTask.isRunning) [self.scrcpyTask terminate];
 }
 @end
+
+// NSApplication.delegate 不持有对象，永久强引用确保 NSTimer 的回调不会访问已释放的控制器。
+static AppController *gAppController=nil;
 
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
@@ -497,8 +571,8 @@ int main(int argc, const char *argv[]) {
             return code;
         }
         NSApplication *app=NSApplication.sharedApplication;
-        AppController *controller=AppController.new;
-        app.delegate=controller;
+        gAppController=AppController.new;
+        app.delegate=gAppController;
         [app run];
     }
     return 0;
